@@ -9,7 +9,5 @@ processors:
 
 output.elasticsearch:
   hosts: ['elasticsearch:9200']
-
-setup.ilm.enabled: auto
-setup.ilm.rollover_alias: "filebeat"
-setup.ilm.pattern: "{now/d}-000001"
+  username: elastic
+  password: ${ELASTIC_PASSWORD:bootcamp-elastic}
