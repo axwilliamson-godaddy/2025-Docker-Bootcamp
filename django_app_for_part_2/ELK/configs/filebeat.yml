@@ -7,6 +7,8 @@ filebeat.autodiscover:
 processors:
 - add_docker_metadata: ~
 
+# Beats config substitution uses ${VAR:default} (single colon) — distinct from
+# the docker-compose ${VAR:-default} syntax you'll see in docker-compose.yml.
 output.elasticsearch:
   hosts: ['elasticsearch:9200']
   username: elastic

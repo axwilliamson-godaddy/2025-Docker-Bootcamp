@@ -102,8 +102,6 @@ services:
       options:
         max-size: '2m'
         max-file: '5'
-    environment:
-      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:-bootcamp-elastic}
     depends_on:
       elasticsearch:
         condition: service_healthy

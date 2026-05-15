@@ -175,11 +175,11 @@ This should spit out the docker image id, which is a unique identifier for the c
 
 ### Expose the cache to your host (`-p`)
 
-By default, the container listens on port 6379 — but only inside Docker's internal network. Your laptop can't reach it. To open a path from your host into the container, use `-p HOST_PORT:CONTAINER_PORT`:
+By default, the container listens on port 6379 — but only inside Docker's internal network. Your laptop can't reach it. To open a path from your host into the container, use `-p HOST_IP:HOST_PORT:CONTAINER_PORT`. Bind to loopback (`127.0.0.1`) so the port is reachable from your machine but not from the wider network:
 
 ```bash
 docker rm -f cache
-docker run --name cache -p 6379:6379 -d valkey/valkey:8-alpine
+docker run --name cache -p 127.0.0.1:6379:6379 -d valkey/valkey:8-alpine
 docker ps --filter name=cache --format "table {{.Names}}\t{{.Ports}}"
 ```
 
@@ -187,10 +187,10 @@ Notice the `PORTS` column now shows the host binding:
 
 ```
 NAMES     PORTS
-cache     0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+cache     127.0.0.1:6379->6379/tcp
 ```
 
-Now anything on your host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through your host's network bridge:
+Now your host can talk to Valkey on `localhost:6379`. We can prove it by running another disposable container that connects through your host's network bridge:
 
 ```bash
 docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
@@ -200,7 +200,7 @@ docker run --rm valkey/valkey:8-alpine redis-cli -h host.docker.internal ping
 PONG
 ```
 
-> **Tip:** if you don't want this exposed to your whole network, bind only to loopback with `-p 127.0.0.1:6379:6379`. You'll thank yourself when you're on coffeeshop wifi.
+> **When to expose more broadly:** the shorter `-p 6379:6379` form binds to `0.0.0.0` and exposes the port on every interface — useful when another machine on your LAN actually needs to connect, but easy to leak on coffeeshop wifi. Default to loopback and broaden deliberately.
 
 ### View container in container list
 
@@ -403,21 +403,7 @@ The container died and Docker brought it back. `RestartCount=1` is your proof. T
 
 > **Heads up:** `docker kill` is treated as user intent in Docker Desktop and does *not* trigger a restart. To test the policy, simulate a real crash from inside the container (like the `SHUTDOWN NOSAVE` above).
 
-### Pass config in via `-e`
-
-Apps shouldn't bake configuration into their image — they should read it from environment variables. The `-e KEY=VALUE` flag injects a variable into the container's environment:
-
-```bash
-docker run --rm -e CACHE_HOST=somehost.invalid bootcamp check_cache 2>&1 | tail -3
-```
-
-```
-  File "/usr/local/lib/python3.13/site-packages/redis/connection.py", line 397, in connect_check_health
-    raise ConnectionError(self._error_message(e))
-redis.exceptions.ConnectionError: Error -2 connecting to somehost.invalid:6379. Name or service not known.
-```
-
-Look at the error message — it's trying to reach `somehost.invalid:6379` because the `CACHE_HOST` env var we injected overrode the default. Useful when you want one image that points at staging vs prod just by changing the env. Pass `-e` multiple times for multiple variables, or use `--env-file path/to/.env` to load a whole file at once.
+> **Coming up:** the third runtime flag — `-e` for injecting environment variables — needs a custom image to demonstrate well, so we'll cover it once we've built one in the next chapter.
 
 ```bash
 docker rm -f cache
@@ -634,6 +620,14 @@ Now the wheel build runs from scratch — that's the multi-second cost we usuall
 
 > **Pro tip:** `--no-cache` forces a clean rebuild. Useful when you suspect cached layers are masking a bug, but slow — only reach for it deliberately.
 
+Before moving on, revert the demo edits so your working tree is clean:
+
+```bash
+# Drop the trailing comment we appended and the blank line in requirements.txt
+sed -i.bak -e '${/^# tweak$/d;}' redis_client_app/cache_client.py && rm redis_client_app/cache_client.py.bak
+sed -i.bak -e '${/^$/d;}' redis_client_app/requirements.txt && rm redis_client_app/requirements.txt.bak
+```
+
 ### Send less to the build daemon (`.dockerignore`)
 
 When you run `docker build`, Docker first packages up the *build context* — the entire directory you pointed at — and ships it to the build engine. Look at what gets shipped:
@@ -750,6 +744,22 @@ redis.exceptions.ConnectionError: Error -2 connecting to cache:6379. Name or ser
 ```
 
 > Doh! What's going on? Well remember how everything is isolated, this is actually a good thing. You need to explicitly tell docker that these containers can communicate with eachother. To do this, we need to create a Docker Network.
+
+#### Override config via `-e` (the runtime flag we deferred)
+
+Before we wire up the network, look closer at that error: it says `connecting to cache:6379`. Where did `cache` come from? It's the default in the Python code — `os.environ.get("CACHE_HOST", "cache")`. Apps shouldn't bake configuration into their image; they read it from environment variables, and `-e KEY=VALUE` is how you inject one at run time:
+
+```bash
+docker run --rm -e CACHE_HOST=somehost.invalid bootcamp check_cache 2>&1 | tail -3
+```
+
+```
+  File "/usr/local/lib/python3.13/site-packages/redis/connection.py", line 397, in connect_check_health
+    raise ConnectionError(self._error_message(e))
+redis.exceptions.ConnectionError: Error -2 connecting to somehost.invalid:6379. Name or service not known.
+```
+
+The error now references `somehost.invalid` — proof that our injected value won. This pattern is how one image works in dev, staging, and prod: you change the env, the image stays the same. Pass `-e` multiple times for multiple variables, or `--env-file path/to/.env` to load a whole file at once.
 
 ### Connect Docker Containers
 
